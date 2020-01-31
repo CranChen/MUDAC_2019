@@ -1,0 +1,309 @@
+---
+title: "P2"
+author: "CranChen"
+date: "March 31, 2019"
+output: html_document
+---
+
+# Problem 2A
+
+```{r}
+
+library("lubridate")
+library("readxl")
+library("stringr")
+library("dplyr")
+library("corrplot")
+
+
+LeSueur = read_xlsx('C:/Users/chenc/Desktop/MUDAC/P2/LeSueur precip hourly.xlsx',skip = 4) %>% as.data.frame()
+colnames(LeSueur)[1] = "Time"
+
+Otter = read_xlsx('C:/Users/chenc/Desktop/MUDAC/P2/Otter Tail precip hourly.xlsx',skip = 4) %>% as.data.frame()
+colnames(Otter)[1] = "Time"
+
+
+Root = read_xlsx('C:/Users/chenc/Desktop/MUDAC/P2/Root precip hourly.xlsx',skip = 3)%>% as.data.frame()
+colnames(Root) = c("Time", paste("A",1:12, sep=""))
+
+
+StLouis = read_xlsx('C:/Users/chenc/Desktop/MUDAC/P2/StLouis precip hourly.xlsx',skip = 2)%>% as.data.frame()
+StLouis = StLouis[-c(1,2),]
+colnames(StLouis)[1] = "Time"
+
+
+
+# Data for LeSueur
+LeSueur$M = as.numeric(substr(LeSueur[,"Time"], 6,7))
+LeSueur$YMD = substr(LeSueur[,"Time"], 0,10)
+
+
+LeSueur_temp = LeSueur %>%
+  filter(3<=M & M<=11) %>% 
+  group_by(YMD) %>% 
+  summarize(sum1 = sum(SWCD246),
+            sum2 = sum(SWCD1124),
+            sum3 = sum(MN218692),
+            sum4 = sum(SWCD1200),
+            sum5 = sum(SWCD1211),
+            sum6 = sum(SWCD1214),
+            sum7 = sum(SWCD966),
+            sum8 = sum(MN218808),
+            sum9 = sum(SWCD179),
+            sum10 = sum(SWCD253),
+            sum11 = sum(SWCD967),
+            sum12 = sum(SWCD906),
+            sum13 = sum(SWCD199),
+            sum14 = sum(SWCD929),
+            sum15 = sum(MN215073),
+            sum16 = sum(SWCD185),
+            sum17 = sum(SWCD183),
+            sum18 = sum(SWCD922),
+            sum19 = sum(NWS910))
+
+LeSueur_Judge = apply(LeSueur_temp[,-1] >= 0.5, 1, sum) > 9
+LeSueur_Final = aggregate(LeSueur_Judge, list(substr(LeSueur_temp$YMD,1,4)), sum)
+
+
+# Data For Otter
+Otter$M = as.numeric(substr(Otter[,"Time"], 6,7))
+Otter$YMD = substr(Otter[,"Time"], 0,10)
+
+
+Otter_temp = Otter %>%
+  filter(3<=M & M<=11) %>% 
+  group_by(YMD) %>% 
+  summarize(sum1 = sum(W1),
+            sum2 = sum(W2),
+            sum3 = sum(W3),
+            sum4 = sum(W4),
+            sum5 = sum(W5),
+            sum6 = sum(W6),
+            sum7 = sum(W7),
+            sum8 = sum(W8))
+
+Otter_Judge = apply(Otter_temp[,-1] >= 0.5, 1, sum) > 4
+
+Otter_Final = aggregate(Otter_Judge, list(substr(Otter_temp$YMD,1,4)), sum)
+
+
+# Data For Root
+Root$M = as.numeric(substr(Root[,"Time"], 6,7))
+Root$YMD = substr(Root[,"Time"], 0,10)
+
+
+Root_temp = Root %>%
+  filter(3<=M & M<=11) %>% 
+  group_by(YMD) %>% 
+  summarize(sum1 = sum(A1),
+            sum2 = sum(A2),
+            sum3 = sum(A3),
+            sum4 = sum(A4),
+            sum5 = sum(A5),
+            sum6 = sum(A6),
+            sum7 = sum(A7),
+            sum8 = sum(A8),
+            sum9 = sum(A9),
+            sum10 = sum(A10),
+            sum11 = sum(A11),
+            sum12 = sum(A12))
+
+Root_Judge = apply(Root_temp[,-1] >= 0.5, 1, sum) >= 6
+
+Root_Final = aggregate(Root_Judge, list(substr(Root_temp$YMD,1,4)), sum)
+
+
+# Data For StLouis
+StLouis["Time"] = as.Date(as.numeric(StLouis$Time), origin = "1899-12-30")
+
+StLouis$M = as.numeric(substr(StLouis[,"Time"], 6,7))
+StLouis$YMD = substr(StLouis[,"Time"], 0,10)
+
+StLouis = cbind(StLouis["Time"], apply(StLouis[,-c(1, length(names(StLouis)))], 2, as.numeric ),StLouis["YMD"])
+
+
+StLouis_temp = StLouis %>%
+  filter(3<=M & M<=11) %>% 
+  group_by(YMD) %>% 
+  summarize(sum1 = sum(MN210387),
+            sum2 = sum(MN210989),
+            sum3 = sum(COQ),
+            sum4 = sum(MN211840),
+            sum5 = sum(DLH),
+            sum6 = sum(MN212576),
+            sum7 = sum(EVM),
+            sum8 = sum(MN212842),
+            sum9 = sum(MN213730),
+            sum10 = sum(MN213863),
+            sum11 = sum(WI476413),
+            sum12 = sum(SUW),
+            sum13 = sum(HIB),
+            sum14 = sum(JANZENE),
+            sum15 = sum(KUUSINEN),
+            sum16 = sum(POMROY),
+            sum17 = sum(SIKKILA)
+            )
+
+StLouis_Judge = apply(StLouis_temp[,-1] >= 0.5, 1, sum) >= 6
+
+StLouis_Final = aggregate(StLouis_Judge, list(substr(Root_temp$YMD,1,4)), sum)
+
+
+LeSueur_Final
+Otter_Final
+Root_Final
+StLouis_Final
+
+```
+
+
+
+Total Precipitation during April to June for each dataset
+```{r}
+
+# LeSueur
+LeSueur_temp = LeSueur %>% 
+  filter(4<=M & M<=11)
+LeSueur_AJ = apply( select(LeSueur_temp,-c(Time, YMD, M)), 1, sum) %>% 
+  aggregate(list( substr(LeSueur_temp$YMD,1,4)), sum)
+
+
+
+# Otter
+Otter_temp = Otter %>% 
+  filter(4<=M & M<=11)
+Otter_AJ = apply( select(Otter_temp,-c(Time, YMD, M)), 1, sum) %>% 
+  aggregate(list( substr(Otter_temp$YMD,1,4)), sum)
+
+
+# Root
+Root_temp = Root %>% 
+  filter(4<=M & M<=11)
+Root_AJ = apply( select(Root_temp,-c(Time, YMD, M)), 1, sum) %>% 
+  aggregate(list( substr(Root_temp$YMD,1,4)), sum)
+
+
+
+# StLouis
+StLouis_temp = StLouis %>% 
+  filter(4<=M & M<=11)
+StLouis_AJ = apply( select(StLouis_temp,-c(Time, YMD, M)), 1, sum) %>% 
+  aggregate(list( substr(StLouis_temp$YMD,1,4)), sum)
+
+
+
+LeSueur_AJ
+Otter_AJ
+Root_AJ
+StLouis_AJ
+
+```
+
+
+
+
+
+
+# Problem 2B
+
+```{r}
+
+WQD = read_xlsx("C:/Users/chenc/Desktop/MUDAC/P2/Water_quality_data_Problem2.xlsx")
+
+```
+
+
+Le Sueur River nr Rapidan, MN66  
+```{r}
+
+LE_TSS = WQD[WQD$Name == "Le Sueur River nr Rapidan, MN66" & WQD$Parameter == "Total suspended solids",]
+LE_Nitrate = WQD[WQD$Name == "Le Sueur River nr Rapidan, MN66" & WQD$Parameter == "Nitrate",]
+
+
+LE = data.frame(APII = LeSueur_Final$x, 
+           Total_AJ  = LeSueur_AJ$x,
+           TSS = LE_TSS$`Avg. Concentration (mg/L)`,
+           Nitrate = LE_Nitrate$`Avg. Concentration (mg/L)`)
+
+LE
+
+cor(LE)
+corrplot(cor(LE), method = "pie")
+
+```
+
+
+
+
+Otter Tail River at Breckenridge, CSAH16
+```{r}
+
+Otter_TSS = WQD[WQD$Name == "Otter Tail River at Breckenridge, CSAH16" & WQD$Parameter == "Total suspended solids",]
+Otter_Nitrate = WQD[WQD$Name == "Otter Tail River at Breckenridge, CSAH16" & WQD$Parameter == "Nitrate",]
+
+
+Otter_Both = data.frame(APII = Otter_Final$x, 
+           Total_AJ  = Otter_AJ$x,
+           TSS = Otter_TSS$`Avg. Concentration (mg/L)`,
+           Nitrate = Otter_Nitrate$`Avg. Concentration (mg/L)`)
+
+Otter_Both
+
+cor(Otter_Both)
+corrplot(cor(Otter_Both), method = "pie")
+
+
+```
+
+
+
+
+
+
+
+Root River nr Mound Prairie, CSAH25
+```{r}
+
+Root_TSS = WQD[WQD$Name == "Root River nr Mound Prairie, CSAH25" & WQD$Parameter == "Total suspended solids",]
+Root_Nitrate = WQD[WQD$Name == "Root River nr Mound Prairie, CSAH25" & WQD$Parameter == "Nitrate",]
+
+
+Root_Both = data.frame(APII = Root_Final$x, 
+           Total_AJ  = Root_AJ$x,
+           TSS = Root_TSS$`Avg. Concentration (mg/L)`,
+           Nitrate = Root_Nitrate$`Avg. Concentration (mg/L)`)
+
+Root_Both
+
+cor(Root_Both)
+corrplot(cor(Root_Both), method = "pie")
+
+
+```
+
+
+
+St. Louis River at Scanlon, MN
+
+```{r}
+
+St_TSS = WQD[WQD$Name == "St. Louis River at Scanlon, MN" & WQD$Parameter == "Total suspended solids",]
+St_Nitrate = WQD[WQD$Name == "St. Louis River at Scanlon, MN" & WQD$Parameter == "Nitrate",]
+
+
+St_Both = data.frame(APII = StLouis_Final$x, 
+           Total_AJ  = StLouis_AJ$x,
+           TSS = St_TSS$`Avg. Concentration (mg/L)`,
+           Nitrate = St_Nitrate$`Avg. Concentration (mg/L)`)
+
+St_Both
+
+cor(St_Both)
+corrplot(cor(St_Both), method = "pie")
+
+
+```
+
+
+
+

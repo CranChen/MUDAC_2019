@@ -1,0 +1,455 @@
+---
+title: "P1"
+author: "CranChen"
+date: "March 31, 2019"
+output: html_document
+---
+
+
+
+
+```{r, message = F, warning=F}
+
+library("readxl")
+library("dplyr")
+library("ggplot2")
+library("xgboost")
+library("glmnet")
+library("caret")
+library("randomForest")
+
+```
+
+
+
+
+# EDA
+
+```{r}
+# Data Import 
+original_data = read_xlsx('C:/Users/chenc/Desktop/MUDAC/P1/MUDAC_data_Problem1.xlsx',sheet = 'data',skip = 2)[1:50,1:18]
+
+
+# data for analysis
+data1 = data.frame(original_data)
+row.names(data1) = data1$Watershed.Monitoring.Site.Location
+data1$Watershed.Monitoring.Site.Location = NULL
+names(data1)[which(names(data1)=="Total.Suspended.Solid..TSS.")] = "TSS"
+
+# PCA
+pca_data = original_data %>% 
+  data.frame() %>% 
+  select(-Watershed.Monitoring.Site.Location,-Total.Suspended.Solid..TSS., -Nitrate)
+
+apply(pca_data, 2, sd)
+
+pca.out = pca_data %>%
+  scale() %>% 
+  prcomp()
+
+var_pca = pca.out$sdev^2
+
+(var_pca[1] + var_pca[1]) / sum(var_pca)
+
+# After Scale Data the proportion of first PC still high reach 0.8026429 (result is good)
+
+plot(var_pca/sum(var_pca) , xlab=" Principal Component ", ylab="Proportion of Variance Explained ",type="b")
+
+biplot(pca.out)
+
+# From PCA plot,
+# observation 29 and 46 far away from center
+# 50,37,40 a little bit far away.
+
+
+# Clustering Analysis
+
+# Kmeans
+set.seed(1)
+
+cluster_data = original_data %>% 
+  data.frame() %>% 
+  select(-Watershed.Monitoring.Site.Location,-Total.Suspended.Solid..TSS., -Nitrate)
+
+km.out = kmeans(cluster_data, 4, nstart = 100)
+
+km.out$cluster
+
+table(km.out$cluster)
+
+plot(pca.out$x[,1], pca.out$x[,2],col = c("green","black","blue","red")[km.out$cluster],pch=19)
+
+# From the pca + kmeans plot, each group has almost same number of observations.
+
+# Hierarchical
+
+hc.complete = hclust(dist(cluster_data), method = "complete")
+
+plot(hc.complete ,main="Complete Linkage ", xlab="", sub ="", cex =.9) 
+
+hc_class = cutree(hc.complete, 4)
+
+table(hc_class)
+
+plot(pca.out$x[,1], pca.out$x[,2],col = c("green","black","blue","red")[hc_class],pch=19)
+
+# The red points is the group with smallest number of points 
+# which also includes obsverstion of 29, 46. Same as the result of pc
+
+par(mfrow = c(1,2))
+biplot(pca.out)
+
+plot(pca.out$x[,1], pca.out$x[,2],col = c("green","black","blue","red")[hc_class],pch=19)
+
+
+```
+
+
+# Before moving Outliers
+
+for TSS (Before)
+
+```{r}
+# Machine Learning Model
+
+# Because this dataset has to many varialbes and small observations (even incluing outliers)
+# It would be eaiser to overfit model 
+# Ridge/Lasso or Elastic Net method offer a good ways to solve this problem  
+
+
+# Split data
+set.seed(1)
+trn_idx = createDataPartition(data1$TSS, p = 0.75, list = FALSE)
+data_trn = data1[trn_idx, ] 
+data_tst = data1[-trn_idx, ]
+
+
+# Ridge Regression
+set.seed(1)
+X = model.matrix(TSS ~ . -Nitrate, data = data_trn)[,-1]
+y = data_trn$TSS
+
+cv.ridge = cv.glmnet(X, y, alpha = 0)
+bestlam_ridge = cv.ridge$lambda.min
+
+ridge_mod = glmnet(X, y, alpha = 0, lambda = bestlam_ridge)
+ridge_pred = predict( ridge_mod, newx = model.matrix(TSS ~ . -Nitrate, data = data_tst)[,-1] )[,1]
+
+( MSE_ridge = mean( (ridge_pred - data_tst$TSS)^2 ) ) #1669.913
+
+
+# Lasso
+set.seed(2)
+cv.lasso = cv.glmnet(X, y, alpha = 1)
+bestlam_lasso = cv.lasso$lambda.min
+
+lasso_mod = glmnet(X, y, alpha = 1, lambda = bestlam_lasso)
+lasso_mod$beta
+
+lasso_pred = predict( lasso_mod, newx = model.matrix(TSS ~ . -Nitrate, data = data_tst)[,-1] )[,1]
+
+( MSE_lasso = mean( (lasso_pred - data_tst$TSS)^2 ) ) # 2515.709
+
+# RandomForest
+set.seed(1) 
+RF_TSS =randomForest(TSS ~ . -Nitrate, data = data_trn, ntree = 5000, importance =TRUE)
+RF_pred = predict (RF_TSS, newdata = data_tst) 
+  
+( MSE_RF = mean( (RF_pred - data_tst$TSS)^2 ) )  # 1139.858
+
+importance(RF_TSS)
+varImpPlot(RF_TSS)
+
+
+
+
+# xgboost
+
+dtrain = xgb.DMatrix( data = as.matrix(select(data_trn, -TSS, -Nitrate)), label = data_trn$TSS )
+X_test = as.matrix(select(data_tst, -TSS, -Nitrate))
+
+set.seed(1)
+param <- list("max_depth" = 2, "eta" = 0.001)
+cv.nround <- 10000
+cv.nfold <- 5
+
+xgb_cv_TSS <- xgb.cv(param=param, 
+                     data = dtrain,
+                     nfold = cv.nfold,
+                     nrounds=cv.nround,
+                     early_stopping_rounds = 30,
+                     verbose = F)
+
+xgb_cv_TSS
+
+set.seed(1)
+xgb_TSS = xgboost(data=dtrain,
+                     max_depth = 2,
+                     eta = 0.001,
+                     nrounds = 2695,
+                     print_every_n = 1000)
+
+xgb_pred = predict(xgb_TSS, X_test)
+
+mean( (xgb_pred - data_tst$TSS)^2 )  # 1486.757
+
+
+```
+
+
+
+
+
+for Nitrate (Before)
+```{r}
+
+# Ridge Regression
+set.seed(1)
+
+X = model.matrix(Nitrate ~ . -TSS, data = data_trn)[,-1]
+y = data_trn$Nitrate
+
+cv.ridge = cv.glmnet(X, y, alpha = 0)
+bestlam_ridge = cv.ridge$lambda.min
+
+ridge_mod = glmnet(X, y, alpha = 0, lambda = bestlam_ridge)
+ridge_pred = predict( ridge_mod, newx = model.matrix(Nitrate~ . -TSS , data = data_tst)[,-1] )[,1]
+
+( MSE_ridge = mean( (ridge_pred - data_tst$Nitrate)^2 ) )  #3.167908
+
+
+# Lasso
+set.seed(2)
+cv.lasso = cv.glmnet(X, y, alpha = 1)
+bestlam_lasso = cv.lasso$lambda.min
+
+lasso_mod = glmnet(X, y, alpha = 1, lambda = bestlam_lasso)
+lasso_mod$beta
+
+
+lasso_pred = predict( lasso_mod, newx = model.matrix(Nitrate ~ . -TSS, data = data_tst)[,-1] )[,1]
+
+( MSE_lasso = mean( (lasso_pred - data_tst$Nitrate)^2 ) ) # 2.583584
+
+
+# RandomForest
+set.seed(1) 
+RF_Nitrate =randomForest(Nitrate ~ . -TSS, data = data_trn, ntree = 5000, importance =TRUE)
+RF_pred = predict (RF_Nitrate, newdata = data_tst) 
+  
+( MSE_RF = mean( (RF_pred - data_tst$Nitrate)^2 ) )  # 2.087315
+
+
+importance(RF_Nitrate)
+varImpPlot(RF_Nitrate)
+
+
+# xgboost
+dtrain = xgb.DMatrix( data = as.matrix(select(data_trn, -TSS, -Nitrate)), label = data_trn$Nitrate )
+X_test = as.matrix(select(data_tst, -TSS, -Nitrate))
+
+set.seed(1)
+param <- list("max_depth" = 2, "eta" = 0.001)
+cv.nround <- 10000
+cv.nfold <- 5
+
+xgb_cv_Nitrate <- xgb.cv(param=param, 
+                     data = dtrain,
+                     nfold = cv.nfold,
+                     nrounds=cv.nround,
+                     early_stopping_rounds = 30,
+                     verbose = F)
+xgb_cv_Nitrate
+
+set.seed(1)
+xgb_Nitrate = xgboost(data=dtrain,
+                     max_depth = 2,
+                     eta = 0.001,
+                     nrounds = 5985,
+                     print_every_n = 1000)
+
+
+xgb_pred = predict(xgb_Nitrate, X_test)
+
+mean( (xgb_pred - data_tst$Nitrate)^2 )  #1.361923
+
+
+```
+
+
+# After moving outliers
+
+for TSS (after)
+
+```{r, warning=F, message=F}
+
+# Moving Outliers
+data1 = data1[-c(29, 46), ]
+
+
+# Split data
+
+set.seed(1)
+trn_idx = createDataPartition(data1$TSS, p = 0.75, list = FALSE)
+data_trn = data1[trn_idx, ] 
+data_tst = data1[-trn_idx, ]
+
+
+# Ridge Regression
+set.seed(1)
+
+X = model.matrix(TSS ~ . -Nitrate, data = data_trn)[,-1]
+y = data_trn$TSS
+
+
+cv.ridge = cv.glmnet(X, y, alpha = 0)
+bestlam_ridge = cv.ridge$lambda.min
+
+ridge_mod = glmnet(X, y, alpha = 0, lambda = bestlam_ridge)
+ridge_pred = predict( ridge_mod, newx = model.matrix(TSS ~ . -Nitrate, data = data_tst)[,-1] )[,1]
+
+( MSE_ridge = mean( (ridge_pred - data_tst$TSS)^2 ) )   # 1608.085
+
+
+# Lasso
+set.seed(2)
+cv.lasso = cv.glmnet(X, y, alpha = 1)
+
+bestlam_lasso = cv.lasso$lambda.min
+
+lasso_mod = glmnet(X, y, alpha = 1, lambda = bestlam_lasso)
+lasso_mod$beta
+
+lasso_pred = predict( lasso_mod, newx = model.matrix(TSS ~ . -Nitrate, data = data_tst)[,-1] )[,1]
+
+( MSE_lasso = mean( (lasso_pred - data_tst$TSS)^2 ) ) # 1444.759
+
+
+# RandomForest
+set.seed(1) 
+
+RF_TSS =randomForest(TSS ~ . -Nitrate, data = data_trn, ntree = 5000, importance =TRUE)
+
+RF_pred = predict (RF_TSS, newdata = data_tst) 
+  
+( MSE_RF = mean( (RF_pred - data_tst$TSS)^2 ) )  # 837.6856
+
+importance(RF_TSS)
+varImpPlot(RF_TSS)
+
+
+# xgboost
+
+dtrain = xgb.DMatrix( data = as.matrix(select(data_trn, -TSS, -Nitrate)), label = data_trn$TSS )
+X_test = as.matrix(select(data_tst, -TSS, -Nitrate))
+
+
+set.seed(1)
+param <- list("max_depth" = 2, "eta" = 0.001)
+cv.nround <- 20000
+cv.nfold <- 5
+
+xgb_cv_TSS <- xgb.cv(param=param, 
+                     data = dtrain,
+                     nfold = cv.nfold,
+                     nrounds=cv.nround,
+                     early_stopping_rounds = 30, 
+                     verbose = F)
+xgb_cv_TSS
+
+set.seed(1)
+xgb_TSS = xgboost(data=dtrain,
+                     max_depth = 2,
+                     eta = 0.001,
+                     nrounds = 2739,
+                     print_every_n = 1000)
+
+xgb_pred = predict(xgb_TSS, X_test)
+
+mean( (xgb_pred - data_tst$TSS)^2 )     # 1017.677
+
+```
+
+
+
+for Nirate (after)
+```{r}
+
+# Ridge Regression
+set.seed(1)
+
+X = model.matrix(Nitrate ~ . -TSS, data = data_trn)[,-1]
+y = data_trn$Nitrate
+
+cv.ridge = cv.glmnet(X, y, alpha = 0)
+bestlam_ridge = cv.ridge$lambda.min
+
+ridge_mod = glmnet(X, y, alpha = 0, lambda = bestlam_ridge)
+ridge_pred = predict( ridge_mod, newx = model.matrix(Nitrate~ . -TSS , data = data_tst)[,-1] )[,1]
+( MSE_ridge = mean( (ridge_pred - data_tst$Nitrate)^2 ) )  #1.643914
+
+
+
+# Lasso
+set.seed(2)
+cv.lasso = cv.glmnet(X, y, alpha = 1)
+bestlam_lasso = cv.lasso$lambda.min
+
+lasso_mod = glmnet(X, y, alpha = 1, lambda = bestlam_lasso)
+lasso_mod$beta
+
+
+lasso_pred = predict( lasso_mod, newx = model.matrix(Nitrate ~ . -TSS, data = data_tst)[,-1] )[,1]
+
+( MSE_lasso = mean( (lasso_pred - data_tst$Nitrate)^2 ) ) #2.119835
+
+
+# RandomForest
+set.seed(1) 
+RF_Nitrate =randomForest(Nitrate ~ . -TSS, data = data_trn, ntree = 5000, importance =TRUE)
+RF_pred = predict (RF_Nitrate, newdata = data_tst) 
+  
+( MSE_RF = mean( (RF_pred - data_tst$Nitrate)^2 ) )  #0.5170357
+
+importance(RF_Nitrate)
+varImpPlot(RF_Nitrate)
+
+
+
+# xgboost
+dtrain = xgb.DMatrix( data = as.matrix(select(data_trn, -TSS, -Nitrate)), label = data_trn$Nitrate )
+X_test = as.matrix(select(data_tst, -TSS, -Nitrate))
+
+set.seed(1)
+param <- list("max_depth" = 2, "eta" = 0.001)
+cv.nround <- 20000
+cv.nfold <- 5
+
+xgb_cv_Nitrate <- xgb.cv(param=param, 
+                     data = dtrain,
+                     nfold = cv.nfold,
+                     nrounds=cv.nround,
+                     early_stopping_rounds = 30,
+                     verbose = F)
+xgb_cv_Nitrate
+
+set.seed(1)
+
+xgb_Nitrate = xgboost(data=dtrain,
+                     max_depth = 2,
+                     eta = 0.001,
+                     nrounds = 5000, 
+                     print_every_n = 1000)
+
+xgb_pred = predict(xgb_Nitrate, X_test)
+
+mean( (xgb_pred - data_tst$Nitrate)^2 )   # 1.586211
+
+
+```
+
+
+
+
+
+
